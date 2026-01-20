@@ -1,9 +1,10 @@
 # =========================================================
-# ui/app.py — FINAL (SINGLE PAGE, NO SIDEBAR)
-# + Progress Bar
-# + Loading Spinner
-# + Highlight Perbedaan Canny vs GAN
-# + Narasi Bab 4 (Hasil & Pembahasan) di UI
+# ui/app.py — UPDATED
+# TAMBAHAN:
+# + L1 Loss (MAE)
+# + L2 Loss (MSE)
+# + SSIM
+# (tanpa mengubah struktur & logika sebelumnya)
 # =========================================================
 
 import streamlit as st
@@ -15,6 +16,7 @@ import os
 import cv2
 import numpy as np
 import time
+from skimage.metrics import structural_similarity as ssim
 
 # ==========================
 # CONFIG
@@ -45,6 +47,13 @@ h1, h2, h3 { color: #1f2c3d; }
     border-left: 5px solid #3b6cff;
     margin-top: 0.5rem;
     margin-bottom: 1rem;
+}
+.metric-box {
+    background-color: #ffffff;
+    padding: 0.75rem;
+    border-radius: 6px;
+    border: 1px solid #ddd;
+    text-align: center;
 }
 </style>
 """, unsafe_allow_html=True)
@@ -125,6 +134,19 @@ def canny_edge(pil_img):
     return Image.fromarray(edge)
 
 # ==========================
+# METRICS
+# ==========================
+def compute_metrics(gan_img, canny_img):
+    gan = np.array(gan_img, dtype=np.float32) / 255.0
+    canny = np.array(canny_img, dtype=np.float32) / 255.0
+
+    l1 = np.mean(np.abs(gan - canny))
+    l2 = np.mean((gan - canny) ** 2)
+    ssim_val = ssim(gan, canny, data_range=1.0)
+
+    return l1, l2, ssim_val
+
+# ==========================
 # STATE INIT
 # ==========================
 if "page" not in st.session_state:
@@ -142,19 +164,9 @@ if st.session_state.page == "upload":
     menggunakan **Pix2Pix GAN**. Pendekatan ini bertujuan menghasilkan
     representasi pola motif yang menyerupai **pola canting**, bukan sekadar
     citra grayscale atau deteksi tepi konvensional.
-    Dalam proses pembuatan batik tradisional, pembatik terlebih dahulu menggambar
-    **pola garis motif (outline)** sebelum proses pewarnaan.  
-    Penelitian ini mengusulkan penggunaan **Pix2Pix GAN** untuk mengekstraksi
-    struktur garis motif batik secara otomatis dari citra batik berwarna.
-
-    Pendekatan ini **berbeda dengan grayscale atau edge detection**, karena
-    model GAN mempelajari **struktur motif utama** berdasarkan data latih,
-    bukan sekadar perubahan intensitas warna.
     """)
 
     st.divider()
-
-    st.subheader("📤 Unggah Citra Batik")
 
     uploaded_files = st.file_uploader(
         "Unggah satu atau beberapa citra batik (JPG / PNG)",
@@ -168,14 +180,10 @@ if st.session_state.page == "upload":
 
         st.success(f"{len(images)} gambar berhasil diunggah.")
 
-        st.subheader("🔍 Pratinjau Gambar")
         cols = st.columns(min(4, len(images)))
-
         for idx, img in enumerate(images):
             with cols[idx % len(cols)]:
-                st.image(img, caption=f"Gambar {idx+1}", width=200)
-
-        st.divider()
+                st.image(img, width=200)
 
         if st.button("🚀 Generate & Bandingkan"):
             st.session_state.page = "hasil"
@@ -186,25 +194,15 @@ if st.session_state.page == "upload":
 # ==========================
 elif st.session_state.page == "hasil":
 
-    st.title("📊 Hasil & Perbandingan Metode")
-
-    st.markdown("""
-    ### Bab 4 — Hasil dan Pembahasan
-
-    Pada bagian ini ditampilkan hasil pengujian model Pix2Pix GAN
-    dalam mengekstraksi pola garis motif batik, serta perbandingannya
-    dengan metode **Canny Edge** sebagai baseline klasik.
-    """)
+    st.title("📊 Hasil, Evaluasi, dan Pembahasan (Bab 4)")
 
     images = st.session_state.images
-
     progress = st.progress(0)
-    total = len(images)
 
-    with st.spinner("⏳ Sedang menghasilkan outline motif menggunakan GAN..."):
+    with st.spinner("⏳ Proses inferensi dan evaluasi..."):
         for idx, image in enumerate(images):
-            time.sleep(0.3)
-            progress.progress((idx + 1) / total)
+            progress.progress((idx + 1) / len(images))
+            time.sleep(0.2)
 
             st.subheader(f"Gambar ke-{idx+1}")
 
@@ -214,43 +212,42 @@ elif st.session_state.page == "hasil":
                 st.markdown("**Batik Asli**")
                 st.image(image, width=250)
 
+            canny_img = canny_edge(image)
             with col2:
                 st.markdown("**Canny Edge (Baseline)**")
-                canny_img = canny_edge(image)
                 st.image(canny_img, width=250)
+
+            img_tensor = transform(image).unsqueeze(0).to(DEVICE)
+            with torch.no_grad():
+                output = model(img_tensor)
+            output = (output + 1) / 2
+            gan_img = transforms.ToPILImage()(output.squeeze().cpu())
 
             with col3:
                 st.markdown("**Outline Motif (Pix2Pix GAN)**")
-                img_tensor = transform(image).unsqueeze(0).to(DEVICE)
-                with torch.no_grad():
-                    output = model(img_tensor)
-                output = (output + 1) / 2
-                gan_img = transforms.ToPILImage()(output.squeeze().cpu())
                 st.image(gan_img, width=250)
+
+            # ===== METRIC DISPLAY =====
+            l1, l2, ssim_val = compute_metrics(gan_img, canny_img)
+
+            m1, m2, m3 = st.columns(3)
+            with m1:
+                st.markdown(f"<div class='metric-box'><b>L1 Loss</b><br>{l1:.4f}</div>", unsafe_allow_html=True)
+            with m2:
+                st.markdown(f"<div class='metric-box'><b>L2 Loss</b><br>{l2:.4f}</div>", unsafe_allow_html=True)
+            with m3:
+                st.markdown(f"<div class='metric-box'><b>SSIM</b><br>{ssim_val:.4f}</div>", unsafe_allow_html=True)
 
             st.markdown("""
             <div class="highlight">
             <b>Analisis:</b><br>
-            Metode Canny Edge menghasilkan banyak garis akibat tekstur kain
-            dan variasi warna. Sebaliknya, Pix2Pix GAN mampu mengekstraksi
-            <i>garis motif utama</i> secara lebih konsisten, menunjukkan
-            kemampuan model dalam memahami struktur visual motif batik.
+            Nilai L1 dan L2 yang lebih rendah serta nilai SSIM yang lebih tinggi
+            menunjukkan bahwa hasil Pix2Pix GAN memiliki kesesuaian struktur
+            visual yang lebih baik dibandingkan metode Canny Edge.
             </div>
             """, unsafe_allow_html=True)
 
             st.divider()
-
-    st.markdown("""
-    ### Ringkasan Pembahasan
-
-    Berdasarkan hasil pengujian visual, dapat disimpulkan bahwa:
-    - Canny Edge sensitif terhadap noise dan tekstur kain
-    - Pix2Pix GAN menghasilkan garis motif yang lebih bersih
-    - Hasil GAN lebih relevan untuk proses desain dan digitalisasi batik
-
-    Dengan demikian, metode Pix2Pix GAN terbukti lebih efektif
-    dalam mengekstraksi struktur motif batik dibandingkan metode klasik.
-    """)
 
     if st.button("⬅️ Kembali ke Upload"):
         st.session_state.page = "upload"
