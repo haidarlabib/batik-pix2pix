@@ -1,8 +1,21 @@
-opencv-python
-streamlit
-torch
-torchvision
-numpy
-pandas
-Pillow
-scikit-image
+# ===== CORE =====
+python>=3.10,<3.11
+
+# ===== STREAMLIT =====
+streamlit>=1.31.0
+
+# ===== DEEP LEARNING =====
+torch>=2.1.0
+torchvision>=0.16.0
+
+# ===== IMAGE & CV =====
+opencv-python>=4.8.0
+Pillow>=10.0.0
+scikit-image>=0.22.0
+
+# ===== DATA =====
+numpy>=1.24.0
+pandas>=2.0.0
+
+# ===== VISUALIZATION =====
+matplotlib>=3.8.0
