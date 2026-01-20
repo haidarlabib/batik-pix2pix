@@ -1,21 +1,20 @@
-# ===== CORE =====
-python>=3.10,<3.11
+# ===== PYTHON =====
+python>=3.13
 
-# ===== STREAMLIT =====
-streamlit>=1.31.0
+# ===== UI =====
+streamlit>=1.35.0
 
 # ===== DEEP LEARNING =====
-torch>=2.1.0
-torchvision>=0.16.0
+torch>=2.2.0
+torchvision>=0.17.0
 
-# ===== IMAGE & CV =====
-opencv-python>=4.8.0
-Pillow>=10.0.0
-scikit-image>=0.22.0
+# ===== IMAGE PROCESSING (NO OPENCV) =====
+Pillow>=10.3.0
+scikit-image>=0.23.0
 
 # ===== DATA =====
-numpy>=1.24.0
-pandas>=2.0.0
+numpy>=2.0.0
+pandas>=2.2.0
 
 # ===== VISUALIZATION =====
-matplotlib>=3.8.0
+matplotlib>=3.9.0
