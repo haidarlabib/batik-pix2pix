@@ -1,20 +1,11 @@
-# ===== PYTHON =====
+
 python>=3.13
-
-# ===== UI =====
 streamlit>=1.35.0
-
-# ===== DEEP LEARNING =====
 torch>=2.2.0
 torchvision>=0.17.0
-
-# ===== IMAGE PROCESSING (NO OPENCV) =====
 Pillow>=10.3.0
 scikit-image>=0.23.0
-
-# ===== DATA =====
 numpy>=2.0.0
 pandas>=2.2.0
-
-# ===== VISUALIZATION =====
 matplotlib>=3.9.0
+
