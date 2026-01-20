@@ -1,22 +1,19 @@
-# =========================================================
-# ui/app.py — UPDATED
-# TAMBAHAN:
-# + L1 Loss (MAE)
-# + L2 Loss (MSE)
-# + SSIM
-# (tanpa mengubah struktur & logika sebelumnya)
-# =========================================================
-
 import streamlit as st
 import torch
+import pandas as pd
 import torch.nn as nn
 from torchvision import transforms
 from PIL import Image
 import os
 import cv2
+import base64
 import numpy as np
 import time
 from skimage.metrics import structural_similarity as ssim
+
+
+
+
 
 # ==========================
 # CONFIG
@@ -26,21 +23,33 @@ DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MODEL_PATH = os.path.join(BASE_DIR, "models", "pix2pix_outline.pth")
-
+LIBRARY_DIR = os.path.join(BASE_DIR, "library_batik")
 # ==========================
-# STYLE (AKADEMIK)
+# STYLE
 # ==========================
-st.set_page_config(
-    page_title="Batik Outline Generator (GAN)",
-    layout="wide"
-)
+st.set_page_config(page_title="Batik Outline Generator (GAN)", layout="wide")
 
 st.markdown("""
 <style>
-.main { background-color: #f8f9fa; }
-h1, h2, h3 { color: #1f2c3d; }
-.block-container { padding-top: 2rem; }
-.caption { font-size: 0.9rem; color: #555; }
+/* ===== GLOBAL ===== */
+.main {
+    background-color: #f8f9fa;
+}
+
+h1, h2, h3 {
+    color: #1f2c3d;
+}
+
+.block-container {
+    padding-top: 2rem;
+}
+
+.caption {
+    font-size: 0.9rem;
+    color: #555;
+}
+
+/* ===== HIGHLIGHT / INFO BOX ===== */
 .highlight {
     background-color: #eef4ff;
     padding: 0.75rem;
@@ -48,15 +57,47 @@ h1, h2, h3 { color: #1f2c3d; }
     margin-top: 0.5rem;
     margin-bottom: 1rem;
 }
+
+/* ===== METRIC BOX ===== */
 .metric-box {
     background-color: #ffffff;
     padding: 0.75rem;
     border-radius: 6px;
     border: 1px solid #ddd;
-    text-align: center;
 }
+
+/* ===== LIBRARY BATIK ===== */
+.library-container {
+    max-height: 260px;
+    overflow-y: auto;
+    padding: 10px;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    background-color: #ffffff;
+}
+
+.library-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 12px;
+    align-items: start;
+}
+
+.library-img {
+    width: 100%;
+}
+
+.library-img img {
+    width: 10%;
+    height: auto;
+    object-fit: contain;
+    border-radius: 6px;
+    border: 1px solid #ccc;
+}
+
 </style>
 """, unsafe_allow_html=True)
+
 
 # ==========================
 # MODEL
@@ -124,6 +165,23 @@ transform = transforms.Compose([
 ])
 
 # ==========================
+# UTIL: LOAD LIBRARY IMAGES
+# ==========================
+def load_library_images(folder):
+    if not os.path.exists(folder):
+        return []
+    exts = (".jpg", ".jpeg", ".png")
+    files = [os.path.join(folder, f) for f in os.listdir(folder) if f.lower().endswith(exts)]
+    images = []
+    for f in files:
+        try:
+            images.append(Image.open(f).convert("RGB"))
+        except:
+            pass
+    return images
+
+
+# ==========================
 # CANNY
 # ==========================
 def canny_edge(pil_img):
@@ -131,42 +189,70 @@ def canny_edge(pil_img):
     gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
     blur = cv2.GaussianBlur(gray, (5, 5), 0)
     edge = cv2.Canny(blur, 50, 150)
+    edge = cv2.resize(edge, (IMAGE_SIZE, IMAGE_SIZE))
     return Image.fromarray(edge)
 
 # ==========================
 # METRICS
 # ==========================
 def compute_metrics(gan_img, canny_img):
-    gan = np.array(gan_img, dtype=np.float32) / 255.0
-    canny = np.array(canny_img, dtype=np.float32) / 255.0
-
+    gan = cv2.resize(np.array(gan_img), (IMAGE_SIZE, IMAGE_SIZE)).astype(np.float32) / 255.0
+    canny = cv2.resize(np.array(canny_img), (IMAGE_SIZE, IMAGE_SIZE)).astype(np.float32) / 255.0
     l1 = np.mean(np.abs(gan - canny))
     l2 = np.mean((gan - canny) ** 2)
     ssim_val = ssim(gan, canny, data_range=1.0)
-
     return l1, l2, ssim_val
 
+def edge_density(edge_img):
+    arr = np.array(edge_img)
+    return (np.sum(arr > 0) / arr.size) * 100
+
 # ==========================
-# STATE INIT
+# STATE
 # ==========================
 if "page" not in st.session_state:
     st.session_state.page = "upload"
 
 # ==========================
-# PAGE 1 — UPLOAD & PREVIEW
+# PAGE 1
 # ==========================
 if st.session_state.page == "upload":
 
     st.title("🎨 Batik Outline Generator (Pix2Pix GAN)")
-
     st.markdown("""
-    Penelitian ini berfokus pada **ekstraksi struktur garis utama motif batik**
-    menggunakan **Pix2Pix GAN**. Pendekatan ini bertujuan menghasilkan
-    representasi pola motif yang menyerupai **pola canting**, bukan sekadar
-    citra grayscale atau deteksi tepi konvensional.
+    Aplikasi ini mendemonstrasikan ekstraksi **struktur garis motif batik**
+    menggunakan **Pix2Pix GAN**, dibandingkan dengan metode klasik
+    **Canny Edge**.
     """)
 
+    library_images = load_library_images(LIBRARY_DIR)
+
+    st.subheader("📚 Library Contoh Motif Batik")
+
+    if len(library_images) == 0:
+        st.info(
+            "Belum ada gambar di library.\n\n"
+            f"Tambahkan gambar ke folder:\n`{LIBRARY_DIR}`"
+        )
+    else:
+        st.markdown("motif batik dari berbagai daerah di Indonesia:")
+
+        library_images = load_library_images(LIBRARY_DIR)
+
+        if library_images:
+            rows = [library_images[i:i+4] for i in range(0, len(library_images), 4)]
+
+            for row in rows:
+                cols = st.columns(4)
+                for col, img in zip(cols, row):
+                    with col:
+                        st.image(img, width=250)
+
+
+
+
     st.divider()
+
 
     uploaded_files = st.file_uploader(
         "Unggah satu atau beberapa citra batik (JPG / PNG)",
@@ -181,16 +267,16 @@ if st.session_state.page == "upload":
         st.success(f"{len(images)} gambar berhasil diunggah.")
 
         cols = st.columns(min(4, len(images)))
-        for idx, img in enumerate(images):
-            with cols[idx % len(cols)]:
+        for i, img in enumerate(images):
+            with cols[i % len(cols)]:
                 st.image(img, width=200)
 
-        if st.button("🚀 Generate & Bandingkan"):
+        if st.button("🚀 Generate & Evaluasi"):
             st.session_state.page = "hasil"
             st.rerun()
 
 # ==========================
-# PAGE 2 — HASIL & PEMBAHASAN
+# PAGE 2
 # ==========================
 elif st.session_state.page == "hasil":
 
@@ -198,6 +284,8 @@ elif st.session_state.page == "hasil":
 
     images = st.session_state.images
     progress = st.progress(0)
+
+    metrics_rows = []
 
     with st.spinner("⏳ Proses inferensi dan evaluasi..."):
         for idx, image in enumerate(images):
@@ -213,8 +301,9 @@ elif st.session_state.page == "hasil":
                 st.image(image, width=250)
 
             canny_img = canny_edge(image)
+
             with col2:
-                st.markdown("**Canny Edge (Baseline)**")
+                st.markdown("**Canny Edge**")
                 st.image(canny_img, width=250)
 
             img_tensor = transform(image).unsqueeze(0).to(DEVICE)
@@ -224,31 +313,71 @@ elif st.session_state.page == "hasil":
             gan_img = transforms.ToPILImage()(output.squeeze().cpu())
 
             with col3:
-                st.markdown("**Outline Motif (Pix2Pix GAN)**")
+                st.markdown("**Outline Motif (GAN)**")
                 st.image(gan_img, width=250)
 
-            # ===== METRIC DISPLAY =====
             l1, l2, ssim_val = compute_metrics(gan_img, canny_img)
+            d_canny = edge_density(canny_img)
+            d_gan = edge_density(gan_img)
+
+            metrics_rows.append({
+                "Image": f"Image_{idx+1}",
+                "L1": l1,
+                "L2": l2,
+                "SSIM": ssim_val,
+                "EdgeDensity_Canny": d_canny,
+                "EdgeDensity_GAN": d_gan
+            })
 
             m1, m2, m3 = st.columns(3)
-            with m1:
-                st.markdown(f"<div class='metric-box'><b>L1 Loss</b><br>{l1:.4f}</div>", unsafe_allow_html=True)
-            with m2:
-                st.markdown(f"<div class='metric-box'><b>L2 Loss</b><br>{l2:.4f}</div>", unsafe_allow_html=True)
-            with m3:
-                st.markdown(f"<div class='metric-box'><b>SSIM</b><br>{ssim_val:.4f}</div>", unsafe_allow_html=True)
+            m1.metric("L1 Loss", f"{l1:.4f}")
+            m2.metric("L2 Loss", f"{l2:.4f}")
+            m3.metric("SSIM", f"{ssim_val:.4f}")
+
+            d1, d2 = st.columns(2)
+            d1.metric("Edge Density Canny (%)", f"{d_canny:.2f}")
+            d2.metric("Edge Density GAN (%)", f"{d_gan:.2f}")
 
             st.markdown("""
             <div class="highlight">
-            <b>Analisis:</b><br>
-            Nilai L1 dan L2 yang lebih rendah serta nilai SSIM yang lebih tinggi
-            menunjukkan bahwa hasil Pix2Pix GAN memiliki kesesuaian struktur
-            visual yang lebih baik dibandingkan metode Canny Edge.
+            Canny Edge menghasilkan kepadatan garis tinggi akibat tekstur kain,
+            sedangkan Pix2Pix GAN lebih selektif dan fokus pada garis motif utama.
             </div>
             """, unsafe_allow_html=True)
 
             st.divider()
 
-    if st.button("⬅️ Kembali ke Upload"):
+    df = pd.DataFrame(metrics_rows)
+
+    st.subheader("📊 Rata-rata Metrik Seluruh Batch")
+    c1, c2, c3, c4, c5 = st.columns(5)
+    c1.metric("Avg L1", f"{df['L1'].mean():.4f}")
+    c2.metric("Avg L2", f"{df['L2'].mean():.4f}")
+    c3.metric("Avg SSIM", f"{df['SSIM'].mean():.4f}")
+    c4.metric("Avg Edge Canny (%)", f"{df['EdgeDensity_Canny'].mean():.2f}")
+    c5.metric("Avg Edge GAN (%)", f"{df['EdgeDensity_GAN'].mean():.2f}")
+
+    st.subheader("📈 Grafik Perbandingan Edge Density")
+    bar_df = df[["EdgeDensity_Canny", "EdgeDensity_GAN"]]
+    st.bar_chart(bar_df)
+
+    csv = df.to_csv(index=False).encode("utf-8")
+    st.download_button(
+        "⬇️ Download Tabel Metrik (CSV)",
+        csv,
+        "batik_outline_metrics.csv",
+        "text/csv"
+    )
+
+    st.markdown("""
+    ### Ringkasan Bab 4
+
+    Analisis kuantitatif dan visual menunjukkan bahwa Pix2Pix GAN
+    menghasilkan kepadatan garis yang lebih rendah dan selektif,
+    menandakan keberhasilan model dalam mengekstraksi struktur
+    garis utama motif batik dibandingkan metode baseline.
+    """)
+
+    if st.button("⬅️ Kembali"):
         st.session_state.page = "upload"
         st.rerun()
